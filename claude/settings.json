@@ -12,6 +12,17 @@
   "remoteControlAtStartup": true,
   "agentPushNotifEnabled": true,
   "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.bun/bin/bun\" \"$HOME/node_modules/agentgit/src/index.ts\" snap"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [
@@ -25,6 +36,15 @@
       }
     ],
     "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/save-last-response.sh"
+          }
+        ]
+      },
       {
         "hooks": [
           {

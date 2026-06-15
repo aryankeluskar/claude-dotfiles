@@ -20,6 +20,10 @@ cp "$REPO/claude/settings.json" "$HOME/.claude/settings.json"
 backup_if_diff "$REPO/claude/hooks/assume_yes_stop.py" "$HOME/.claude/hooks/assume_yes_stop.py"
 cp "$REPO/claude/hooks/assume_yes_stop.py" "$HOME/.claude/hooks/assume_yes_stop.py"
 
+backup_if_diff "$REPO/claude/hooks/save-last-response.sh" "$HOME/.claude/hooks/save-last-response.sh"
+cp "$REPO/claude/hooks/save-last-response.sh" "$HOME/.claude/hooks/save-last-response.sh"
+chmod +x "$HOME/.claude/hooks/save-last-response.sh"
+
 backup_if_diff "$REPO/claude/statusline.py" "$HOME/.claude/statusline.py"
 cp "$REPO/claude/statusline.py" "$HOME/.claude/statusline.py"
 
