@@ -12,7 +12,8 @@ Behaviour (only in bypass-permissions mode):
   * The counter is reset at the start of every user turn via the UserPromptSubmit
     hook (this same script, invoked with --reset).
 
-MAX_ROUNDS is tunable via the ASSUME_YES_MAX_ROUNDS env var (default 3).
+MAX_ROUNDS is tunable via the ASSUME_YES_MAX_ROUNDS env var (default 1 -- nudge
+once per turn, then allow the stop; set higher to force more keep-going rounds).
 
 Wiring: ~/.claude/settings.json
   hooks.Stop[].hooks[]             -> python3 "$HOME/.claude/hooks/assume_yes_stop.py"
@@ -24,30 +25,29 @@ import os
 import sys
 import time
 
-MAX_ROUNDS = int(os.environ.get("ASSUME_YES_MAX_ROUNDS", "3"))
+MAX_ROUNDS = int(os.environ.get("ASSUME_YES_MAX_ROUNDS", "1"))
 
 REASON = (
     "[Standing instruction — injected by the Stop hook]\n"
-    "The user is usually AFK and not watching this terminal, so the PushNotification and "
-    "AskUserQuestion tools are how you reach them — both go to their phone. Use them readily. "
-    "Before ending your turn:\n"
+    "The user is usually AFK and not watching this terminal; PushNotification and "
+    "AskUserQuestion are how you reach them (both go to their phone). Before ending your turn:\n"
     "1. IN-SCOPE work — any pending sub-step, fix, or follow-through that clearly advances the "
     "user's stated goal: just do it now. Assume the answer is YES and proceed with your best "
-    "judgment, resolving clarifications YOURSELF first (codebase, internet, docs). Keep going "
-    "across rounds until the in-scope work is genuinely finished.\n"
-    "2. NO SLOP. 'Keep going' means real work — edit code, run commands, test, debug, "
-    "investigate, explore. Do NOT manufacture summary/recap markdown, status writeups, reports, "
-    "READMEs, CHANGELOGs, or 'here's what I did' docs unless the user EXPLICITLY asked. If the "
-    "only thing left is to recap or document finished work, do not invent deliverables.\n"
+    "judgment, resolving clarifications YOURSELF first (codebase, internet, docs). Finish the "
+    "in-scope work before you stop.\n"
+    "2. NO SLOP. Real work only — edit code, run commands, test, debug, investigate. Do NOT "
+    "manufacture summary/recap markdown, status writeups, reports, READMEs, CHANGELOGs, or "
+    "'here's what I did' docs unless the user EXPLICITLY asked. If the only thing left is to "
+    "recap or document finished work, do not invent deliverables.\n"
     "3. NEED A DECISION? If there is more than one reasonable next step, or the next step is "
     "out-of-scope / tangential / risky / hard to reverse, or you genuinely cannot tell what the "
-    "user wants — do NOT guess and do NOT stop silently. Ask via AskUserQuestion (reaches their "
-    "phone) AND fire a PushNotification so they see it.\n"
-    "4. DONE or BLOCKED? When you have genuinely completed the whole goal, or hit a real blocker "
-    "you cannot resolve yourself, fire a PushNotification (one line, lead with what they'd act "
-    "on). Because they are AFK, err toward notifying on real completions and blockers rather "
-    "than ending silently. If a decision is also needed, add an AskUserQuestion.\n"
-    "5. Otherwise, while in-scope work remains, just keep going — no notification needed.\n"
+    "user wants — do NOT guess. Ask via AskUserQuestion (reaches their phone) AND fire a "
+    "PushNotification, then stop.\n"
+    "4. DONE? If the task is genuinely complete and no in-scope work remains, fire ONE "
+    "PushNotification (one line, lead with the outcome) to alert the AFK user, then STOP — it is "
+    "fine to end the turn now. Do NOT keep looping or invent extra rounds of empty work.\n"
+    "5. BLOCKED? If you hit a real blocker you cannot resolve yourself, fire a PushNotification "
+    "and AskUserQuestion, then stop.\n"
     "Now act on the above. Do not end the turn silently."
 )
 
