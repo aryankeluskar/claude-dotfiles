@@ -1,4 +1,7 @@
 {
+  "env": {
+    "GATEGUARD_GIT_REPO_RELAX": "1"
+  },
   "permissions": {
     "defaultMode": "dontAsk"
   },

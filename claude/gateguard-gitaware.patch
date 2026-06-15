@@ -1,0 +1,93 @@
+diff --git a/scripts/hooks/gateguard-fact-force.js b/scripts/hooks/gateguard-fact-force.js
+index d28d818..c2be91c 100644
+--- a/scripts/hooks/gateguard-fact-force.js
++++ b/scripts/hooks/gateguard-fact-force.js
+@@ -23,6 +23,7 @@
+ 'use strict';
+ 
+ const crypto = require('crypto');
++const { execFileSync } = require('child_process');
+ const fs = require('fs');
+ const path = require('path');
+ const {
+@@ -502,6 +503,39 @@ function isGateGuardDisabled() {
+   return ECC_DISABLE_VALUES.has(normalizeEnvValue(process.env.ECC_GATEGUARD));
+ }
+ 
++// --- Git-repo airbag relaxation (operator patch) ---
++// When an operation targets a path inside a git work tree, the working copy is
++// recoverable (git history + per-tool agentgit snapshots), so the routine-Bash
++// and first-touch Edit/Write *friction* gates are skipped there. The
++// DESTRUCTIVE gate is intentionally NOT relaxed: `rm -rf`, force-push, and
++// `drop table` can destroy untracked files or history that git does not bring
++// back. Opt-in: enable with GATEGUARD_GIT_REPO_RELAX in {1,true,on,enabled,yes}.
++const gitRepoCache = new Map();
++
++function isGitRepoRelaxEnabled() {
++  return ECC_ENABLE_VALUES.has(normalizeEnvValue(process.env.GATEGUARD_GIT_REPO_RELAX));
++}
++
++function isInsideGitRepo(dir) {
++  const target = String(dir || '').trim() || process.cwd();
++  if (gitRepoCache.has(target)) {
++    return gitRepoCache.get(target);
++  }
++  let inside = false;
++  try {
++    const out = execFileSync('git', ['-C', target, 'rev-parse', '--is-inside-work-tree'], {
++      timeout: 500,
++      stdio: ['ignore', 'pipe', 'ignore'],
++      encoding: 'utf8'
++    });
++    inside = out.trim() === 'true';
++  } catch (_) {
++    inside = false; // not a repo, git missing, or path gone — fail closed (gate stays on)
++  }
++  gitRepoCache.set(target, inside);
++  return inside;
++}
++
+ function sanitizeSessionKey(value) {
+   const raw = String(value || '').trim();
+   if (!raw) {
+@@ -949,6 +983,7 @@ function run(rawInput) {
+   const TOOL_MAP = { edit: 'Edit', write: 'Write', multiedit: 'MultiEdit', bash: 'Bash' };
+   const toolName = TOOL_MAP[rawToolName.toLowerCase()] || rawToolName;
+   const inSubagent = isSubagentInvocation(data);
++  const gitRelax = isGitRepoRelaxEnabled();
+ 
+   if (toolName === 'Edit' || toolName === 'Write') {
+     const filePath = toolInput.file_path || '';
+@@ -960,6 +995,10 @@ function run(rawInput) {
+       return rawInput; // parent session already passed the first-touch file gate
+     }
+ 
++    if (gitRelax && isInsideGitRepo(path.dirname(filePath))) {
++      return rawInput; // inside a git work tree — airbag covers the edit
++    }
++
+     if (!isChecked(filePath)) {
+       const { ok, denials } = markCheckedAndCountDenial(filePath);
+       if (!ok) {
+@@ -983,7 +1022,7 @@ function run(rawInput) {
+     const edits = toolInput.edits || [];
+     for (const edit of edits) {
+       const filePath = edit.file_path || '';
+-      if (filePath && !isClaudeSettingsPath(filePath) && !isChecked(filePath)) {
++      if (filePath && !isClaudeSettingsPath(filePath) && !(gitRelax && isInsideGitRepo(path.dirname(filePath))) && !isChecked(filePath)) {
+         const { ok, denials } = markCheckedAndCountDenial(filePath);
+         if (!ok) {
+           return allowWithStateWarning();
+@@ -1015,6 +1054,12 @@ function run(rawInput) {
+       return rawInput; // allow retry after facts presented
+     }
+ 
++    // Git-repo airbag: inside a work tree the routine first-bash friction gate
++    // is skipped (the destructive gate above already ran and is never relaxed).
++    if (gitRelax && isInsideGitRepo(data.cwd)) {
++      return rawInput;
++    }
++
+     // Operator opt-out: skip the routine-bash gate entirely. The destructive
+     // gate above still fires. This is the documented escape hatch for hosts
+     // (Cursor, OpenCode, etc.) where the once-per-session routine gate is
