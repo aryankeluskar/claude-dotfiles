@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/.bun/bin/bun\" \"$HOME/node_modules/agentgit/src/index.ts\" snap"
+            "command": "[ -f \"$HOME/node_modules/agentgit/src/index.ts\" ] && \"$HOME/.bun/bin/bun\" \"$HOME/node_modules/agentgit/src/index.ts\" snap || true"
           }
         ]
       }
