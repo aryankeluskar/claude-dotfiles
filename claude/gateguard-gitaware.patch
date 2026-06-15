@@ -1,16 +1,81 @@
 diff --git a/scripts/hooks/gateguard-fact-force.js b/scripts/hooks/gateguard-fact-force.js
-index d28d818..c2be91c 100644
+index d28d818..3b7f01a 100644
 --- a/scripts/hooks/gateguard-fact-force.js
 +++ b/scripts/hooks/gateguard-fact-force.js
-@@ -23,6 +23,7 @@
+@@ -23,13 +23,10 @@
  'use strict';
  
  const crypto = require('crypto');
 +const { execFileSync } = require('child_process');
  const fs = require('fs');
  const path = require('path');
- const {
-@@ -502,6 +503,39 @@ function isGateGuardDisabled() {
+-const {
+-  extractCommandSubstitutions,
+-  extractSubshellGroups,
+-  extractBraceGroups
+-} = require('../lib/shell-substitution');
++const { extractCommandSubstitutions, extractSubshellGroups, extractBraceGroups } = require('../lib/shell-substitution');
+ 
+ // Session state — scoped per session to avoid cross-session races.
+ const STATE_DIR = process.env.GATEGUARD_STATE_DIR || path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.gateguard');
+@@ -88,10 +85,10 @@ function getExtraDestructiveRegex() {
+     extraDestructiveCacheRegex = null;
+     if (!extraDestructiveWarnLogged) {
+       try {
+-        process.stderr.write(
+-          `[gateguard-fact-force] ignoring invalid GATEGUARD_BASH_EXTRA_DESTRUCTIVE regex: ${err.message}\n`
+-        );
+-      } catch (_) { /* stderr write failure is non-fatal */ }
++        process.stderr.write(`[gateguard-fact-force] ignoring invalid GATEGUARD_BASH_EXTRA_DESTRUCTIVE regex: ${err.message}\n`);
++      } catch (_) {
++        /* stderr write failure is non-fatal */
++      }
+       extraDestructiveWarnLogged = true;
+     }
+   }
+@@ -112,9 +109,7 @@ function isRoutineBashGateDisabled() {
+  * @returns {string}
+  */
+ function stripQuotedStrings(input) {
+-  return input
+-    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+-    .replace(/"(?:[^"\\]|\\.)*"/g, '""');
++  return input.replace(/'(?:[^'\\]|\\.)*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
+ }
+ 
+ /**
+@@ -168,7 +163,6 @@ function tokenize(segment) {
+   return segment.split(/\s+/).filter(Boolean);
+ }
+ 
+-
+ /**
+  * Tokenize a short allowlisted shell command while preserving quoted
+  * arguments. This is intentionally smaller than a full shell parser: the
+@@ -236,7 +230,10 @@ function tokenizeAllowlistedShellWords(input) {
+  */
+ function commandBasename(token) {
+   if (!token) return '';
+-  return token.replace(/^.*[\\/]/, '').replace(/\.exe$/i, '').toLowerCase();
++  return token
++    .replace(/^.*[\\/]/, '')
++    .replace(/\.exe$/i, '')
++    .toLowerCase();
+ }
+ 
+ /**
+@@ -491,7 +488,9 @@ function isDestructiveBash(command) {
+ // --- State management (per-session, atomic writes, bounded) ---
+ 
+ function normalizeEnvValue(value) {
+-  return String(value || '').trim().toLowerCase();
++  return String(value || '')
++    .trim()
++    .toLowerCase();
+ }
+ 
+ function isGateGuardDisabled() {
+@@ -502,6 +501,51 @@ function isGateGuardDisabled() {
    return ECC_DISABLE_VALUES.has(normalizeEnvValue(process.env.ECC_GATEGUARD));
  }
  
@@ -25,6 +90,18 @@ index d28d818..c2be91c 100644
 +
 +function isGitRepoRelaxEnabled() {
 +  return ECC_ENABLE_VALUES.has(normalizeEnvValue(process.env.GATEGUARD_GIT_REPO_RELAX));
++}
++
++// Trust the harness read-before-edit guarantee (operator patch). The Claude Code
++// Edit/MultiEdit tools refuse to run unless the file was already Read, and Write
++// refuses to overwrite an existing file unless it was Read — so for those cases
++// the "investigation" the gate forces is already guaranteed, and a deny just makes
++// the model re-compose (and re-pay for) the whole edit payload. When enabled, skip
++// the gate for edits and existing-file writes; only brand-NEW file creation (no
++// prior read possible) is still gated. Opt-in: GATEGUARD_TRUST_READ_BEFORE_EDIT in
++// {1,true,on,enabled,yes}.
++function isReadBeforeEditTrusted() {
++  return ECC_ENABLE_VALUES.has(normalizeEnvValue(process.env.GATEGUARD_TRUST_READ_BEFORE_EDIT));
 +}
 +
 +function isInsideGitRepo(dir) {
@@ -50,18 +127,65 @@ index d28d818..c2be91c 100644
  function sanitizeSessionKey(value) {
    const raw = String(value || '').trim();
    if (!raw) {
-@@ -949,6 +983,7 @@ function run(rawInput) {
+@@ -880,11 +924,7 @@ function routineBashMsg() {
+ 
+ function withRecoveryHint(message, hookIds = [EDIT_WRITE_HOOK_ID]) {
+   const disableTargets = hookIds.map(hookId => `\`${hookId}\``).join(' or ');
+-  return [
+-    message,
+-    '',
+-    `Recovery: if GateGuard is blocking setup or repair work, run this session with \`ECC_GATEGUARD=off\` or add ${disableTargets} to \`ECC_DISABLED_HOOKS\`.`
+-  ].join('\n');
++  return [message, '', `Recovery: if GateGuard is blocking setup or repair work, run this session with \`ECC_GATEGUARD=off\` or add ${disableTargets} to \`ECC_DISABLED_HOOKS\`.`].join('\n');
+ }
+ 
+ function isSubagentInvocation(data) {
+@@ -892,12 +932,7 @@ function isSubagentInvocation(data) {
+     return false;
+   }
+ 
+-  const candidates = [
+-    data.agent_id,
+-    data.agentId,
+-    data.parent_tool_use_id,
+-    data.parentToolUseId
+-  ];
++  const candidates = [data.agent_id, data.agentId, data.parent_tool_use_id, data.parentToolUseId];
+ 
+   return candidates.some(candidate => typeof candidate === 'string' && candidate.trim());
+ }
+@@ -949,6 +984,8 @@ function run(rawInput) {
    const TOOL_MAP = { edit: 'Edit', write: 'Write', multiedit: 'MultiEdit', bash: 'Bash' };
    const toolName = TOOL_MAP[rawToolName.toLowerCase()] || rawToolName;
    const inSubagent = isSubagentInvocation(data);
 +  const gitRelax = isGitRepoRelaxEnabled();
++  const trustRead = isReadBeforeEditTrusted();
  
    if (toolName === 'Edit' || toolName === 'Write') {
      const filePath = toolInput.file_path || '';
-@@ -960,6 +995,10 @@ function run(rawInput) {
+@@ -960,6 +997,29 @@ function run(rawInput) {
        return rawInput; // parent session already passed the first-touch file gate
      }
  
++    if (trustRead) {
++      // Edit always requires a prior Read (harness-enforced); Write requires a
++      // prior Read only when overwriting an existing file. In both cases the
++      // investigation is already done, so gating just wastes a re-composed
++      // payload. Brand-new file creation still falls through to the gate.
++      if (toolName === 'Edit') {
++        return rawInput;
++      }
++      let targetExists = false;
++      try {
++        targetExists = fs.existsSync(filePath);
++      } catch (_) {
++        targetExists = false;
++      }
++      if (targetExists) {
++        return rawInput;
++      }
++    }
++
 +    if (gitRelax && isInsideGitRepo(path.dirname(filePath))) {
 +      return rawInput; // inside a git work tree — airbag covers the edit
 +    }
@@ -69,7 +193,14 @@ index d28d818..c2be91c 100644
      if (!isChecked(filePath)) {
        const { ok, denials } = markCheckedAndCountDenial(filePath);
        if (!ok) {
-@@ -983,7 +1022,7 @@ function run(rawInput) {
+@@ -980,10 +1040,14 @@ function run(rawInput) {
+       return rawInput; // parent session already passed the first-touch file gate
+     }
+ 
++    if (trustRead) {
++      return rawInput; // MultiEdit requires a prior Read (harness-enforced)
++    }
++
      const edits = toolInput.edits || [];
      for (const edit of edits) {
        const filePath = edit.file_path || '';
@@ -78,7 +209,7 @@ index d28d818..c2be91c 100644
          const { ok, denials } = markCheckedAndCountDenial(filePath);
          if (!ok) {
            return allowWithStateWarning();
-@@ -1015,6 +1054,12 @@ function run(rawInput) {
+@@ -1015,6 +1079,12 @@ function run(rawInput) {
        return rawInput; // allow retry after facts presented
      }
  

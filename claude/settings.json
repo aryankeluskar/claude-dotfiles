@@ -1,7 +1,8 @@
 {
   "env": {
     "GATEGUARD_GIT_REPO_RELAX": "1",
-    "ECC_DISABLED_HOOKS": "pre:bash:gateguard-fact-force"
+    "ECC_DISABLED_HOOKS": "pre:bash:gateguard-fact-force",
+    "GATEGUARD_TRUST_READ_BEFORE_EDIT": "1"
   },
   "permissions": {
     "defaultMode": "dontAsk"
