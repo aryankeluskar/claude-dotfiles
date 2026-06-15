@@ -1,48 +1,81 @@
 #!/usr/bin/env python3
-"""Stop hook: 'assume yes, proceed' standing instruction.
+"""Stop hook: 'assume yes, keep going' standing instruction (multi-round).
 
-On every turn-end this blocks the stop exactly ONCE and injects an instruction
-back into Claude's context. The `stop_hook_active` guard is what prevents an
-infinite loop: when Claude is already continuing because of this hook, we let it
-stop instead of blocking again.
+Behaviour (only in bypass-permissions mode):
+  * On turn-end, block the stop and inject a standing instruction telling Claude
+    to keep doing in-scope work, and to reach the (usually AFK) user via the
+    PushNotification / AskUserQuestion tools whenever a decision, completion, or
+    blocker comes up.
+  * Multi-round: block up to MAX_ROUNDS times per user turn, then allow the stop
+    so we never loop forever. A per-session counter tracks rounds.
+  * The counter is reset at the start of every user turn via the UserPromptSubmit
+    hook (this same script, invoked with --reset).
 
-This only fires when the session is in bypass-permissions mode
-(`permission_mode == "bypassPermissions"`). In any other mode (default, plan,
-acceptEdits, auto, dontAsk) the stop is allowed through untouched.
+MAX_ROUNDS is tunable via the ASSUME_YES_MAX_ROUNDS env var (default 3).
 
-Wiring: ~/.claude/settings.json -> hooks.Stop[].hooks[] -> command:
-    python3 "$HOME/.claude/hooks/assume_yes_stop.py"
+Wiring: ~/.claude/settings.json
+  hooks.Stop[].hooks[]             -> python3 "$HOME/.claude/hooks/assume_yes_stop.py"
+  hooks.UserPromptSubmit[].hooks[] -> python3 "$HOME/.claude/hooks/assume_yes_stop.py" --reset
 (uses $HOME so the same settings.json works on Linux and macOS.)
 """
 import json
+import os
 import sys
+import time
+
+MAX_ROUNDS = int(os.environ.get("ASSUME_YES_MAX_ROUNDS", "3"))
 
 REASON = (
     "[Standing instruction — injected by the Stop hook]\n"
-    "You are about to end your turn. Before you do, decide whether the next step is IN SCOPE "
-    "of the goal/prompt the user actually asked for:\n"
-    "1. IN-SCOPE work — a pending sub-step, fix, or follow-through that clearly advances the "
-    "user's stated goal: just do it. Assume the answer is YES and proceed with your best "
-    "judgment. Resolve any clarification YOURSELF first (explore the codebase, the internet, "
-    "docs, etc.) rather than asking.\n"
-    "2. CONTINUE WITH ACTION AND AGENCY, NOT SLOP. 'Keep going' means do real work — edit "
-    "code, run commands, test, debug, investigate, explore the codebase, drive the actual goal "
-    "forward. It does NOT mean manufacturing output to look busy: do NOT create summary or "
-    "recap markdown files, status writeups, reports, READMEs, CHANGELOGs, or other docs unless "
-    "the user EXPLICITLY asked for them. No filler, no boilerplate, no 'here's what I did' "
-    "documents. If the only thing left is to recap or document work you already finished, the "
-    "task is DONE — just stop; do not invent deliverables.\n"
-    "3. OUT-OF-SCOPE or judgment-call work — a next step that expands beyond what was asked, "
-    "is tangential, changes direction, is risky/hard to reverse, or where you genuinely cannot "
-    "tell what the user wants: do NOT just barrel ahead. Stop and ask via the AskUserQuestion "
-    "tool, and raise a PushNotification so the user sees it. Don't end the turn silently.\n"
-    "4. Also stop and ask (AskUserQuestion + PushNotification) if you have a STRONG reason to "
-    "believe the user would say NO, or you hit a real blocker you cannot resolve on your own.\n"
-    "5. Notifications are for MILESTONES and the asks above — not routine stops. While there is "
-    "still in-scope work to do, just keep going; do NOT notify. Fire a PushNotification only "
-    "when you have genuinely completed the whole goal, or when you need the user per items 3-4.\n"
+    "The user is usually AFK and not watching this terminal, so the PushNotification and "
+    "AskUserQuestion tools are how you reach them — both go to their phone. Use them readily. "
+    "Before ending your turn:\n"
+    "1. IN-SCOPE work — any pending sub-step, fix, or follow-through that clearly advances the "
+    "user's stated goal: just do it now. Assume the answer is YES and proceed with your best "
+    "judgment, resolving clarifications YOURSELF first (codebase, internet, docs). Keep going "
+    "across rounds until the in-scope work is genuinely finished.\n"
+    "2. NO SLOP. 'Keep going' means real work — edit code, run commands, test, debug, "
+    "investigate, explore. Do NOT manufacture summary/recap markdown, status writeups, reports, "
+    "READMEs, CHANGELOGs, or 'here's what I did' docs unless the user EXPLICITLY asked. If the "
+    "only thing left is to recap or document finished work, do not invent deliverables.\n"
+    "3. NEED A DECISION? If there is more than one reasonable next step, or the next step is "
+    "out-of-scope / tangential / risky / hard to reverse, or you genuinely cannot tell what the "
+    "user wants — do NOT guess and do NOT stop silently. Ask via AskUserQuestion (reaches their "
+    "phone) AND fire a PushNotification so they see it.\n"
+    "4. DONE or BLOCKED? When you have genuinely completed the whole goal, or hit a real blocker "
+    "you cannot resolve yourself, fire a PushNotification (one line, lead with what they'd act "
+    "on). Because they are AFK, err toward notifying on real completions and blockers rather "
+    "than ending silently. If a decision is also needed, add an AskUserQuestion.\n"
+    "5. Otherwise, while in-scope work remains, just keep going — no notification needed.\n"
     "Now act on the above. Do not end the turn silently."
 )
+
+
+def _counter_path(session_id):
+    base = os.path.expanduser("~/.claude/.stop-hook-rounds")
+    try:
+        os.makedirs(base, exist_ok=True)
+        # Opportunistic cleanup so stale per-session counters don't accumulate.
+        now = time.time()
+        for fn in os.listdir(base):
+            fp = os.path.join(base, fn)
+            try:
+                if now - os.path.getmtime(fp) > 86400:
+                    os.remove(fp)
+            except OSError:
+                pass
+    except OSError:
+        pass
+    safe = "".join(c for c in str(session_id or "default") if c.isalnum() or c in "-_")
+    return os.path.join(base, safe or "default")
+
+
+def _read_count(path):
+    try:
+        with open(path) as f:
+            return int(f.read().strip() or "0")
+    except Exception:
+        return 0
 
 
 def main():
@@ -52,16 +85,33 @@ def main():
         # Malformed / empty input: never block the stop.
         sys.exit(0)
 
-    # Loop guard: if this stop is itself the result of a prior block by this
-    # hook, allow the turn to end now.
-    if data.get("stop_hook_active"):
+    path = _counter_path(data.get("session_id"))
+
+    # UserPromptSubmit --reset: clear the per-turn round counter and exit.
+    if "--reset" in sys.argv:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
         sys.exit(0)
 
-    # Only inject the standing instruction in bypass-permissions mode. In every
-    # other permission mode, let the turn end normally.
+    # Stop hook from here on. Only act in bypass-permissions mode.
     if data.get("permission_mode") != "bypassPermissions":
         sys.exit(0)
 
+    rounds = _read_count(path)
+    if rounds >= MAX_ROUNDS:
+        # Hit the per-turn cap -> let the turn end. Leave the counter in place so
+        # any further stop this turn also passes through; UserPromptSubmit
+        # (--reset) clears it when the next user turn begins.
+        sys.exit(0)
+
+    # Block again, inject the instruction, and bump the round counter.
+    try:
+        with open(path, "w") as f:
+            f.write(str(rounds + 1))
+    except Exception:
+        pass
     print(json.dumps({"decision": "block", "reason": REASON}))
     sys.exit(0)
 

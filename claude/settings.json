@@ -32,6 +32,18 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/assume_yes_stop.py\" --reset",
+            "timeout": 5,
+            "statusMessage": "reset assume-yes rounds"
+          }
+        ]
+      }
     ]
   }
 }
