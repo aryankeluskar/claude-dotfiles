@@ -7,7 +7,8 @@ Behaviour (only in bypass-permissions mode):
     PushNotification / AskUserQuestion tools whenever a decision, completion, or
     blocker comes up.
   * Multi-round: block up to MAX_ROUNDS times per user turn, then allow the stop
-    so we never loop forever. A per-session counter tracks rounds.
+    so we never loop forever. A single global counter tracks rounds (NOT keyed by
+    session_id, so the cap holds even if the harness rotates session_id mid-run).
   * The counter is reset at the start of every user turn via the UserPromptSubmit
     hook (this same script, invoked with --reset).
 
@@ -51,13 +52,19 @@ REASON = (
 )
 
 
-def _counter_path(session_id):
+def _counter_path():
+    # A single GLOBAL counter (not keyed by session_id): the round cap must bound
+    # the loop even when the harness rotates session_id mid-conversation. The
+    # UserPromptSubmit --reset clears it at the start of each user turn, which is
+    # what restores the full MAX_ROUNDS budget per turn in a normal session.
     base = os.path.expanduser("~/.claude/.stop-hook-rounds")
     try:
         os.makedirs(base, exist_ok=True)
-        # Opportunistic cleanup so stale per-session counters don't accumulate.
+        # Clean up legacy per-session counters from older versions of this hook.
         now = time.time()
         for fn in os.listdir(base):
+            if fn == "rounds":
+                continue
             fp = os.path.join(base, fn)
             try:
                 if now - os.path.getmtime(fp) > 86400:
@@ -66,8 +73,7 @@ def _counter_path(session_id):
                 pass
     except OSError:
         pass
-    safe = "".join(c for c in str(session_id or "default") if c.isalnum() or c in "-_")
-    return os.path.join(base, safe or "default")
+    return os.path.join(base, "rounds")
 
 
 def _read_count(path):
@@ -85,7 +91,7 @@ def main():
         # Malformed / empty input: never block the stop.
         sys.exit(0)
 
-    path = _counter_path(data.get("session_id"))
+    path = _counter_path()
 
     # UserPromptSubmit --reset: clear the per-turn round counter and exit.
     if "--reset" in sys.argv:
