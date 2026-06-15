@@ -1,0 +1,31 @@
+# This repo only holds curated, portable Claude config. The rules below are a
+# defensive backstop so secrets / machine state can never be committed by accident.
+.DS_Store
+*.log
+*.swp
+
+# Secrets
+**/.credentials.json
+**/.git-credentials
+**/.netrc
+**/*-cache.json
+**/mcp-needs-auth-cache.json
+
+# Per-machine state / history (never sync these)
+**/history.jsonl
+**/projects/
+**/sessions/
+**/session-env/
+**/todos/
+**/tasks/
+**/transcripts/
+**/plans/
+**/cache/
+**/paste-cache/
+**/file-history/
+**/shell-snapshots/
+**/statsig/
+**/telemetry/
+**/debug/
+**/backups/
+**/.sync-backups/

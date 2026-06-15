@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk"
+  },
+  "alwaysThinkingEnabled": true,
+  "effortLevel": "xhigh",
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "dark",
+  "remoteControlAtStartup": true,
+  "agentPushNotifEnabled": true,
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"$HOME/dotfiles-claude/pull.sh\" ] && \"$HOME/dotfiles-claude/pull.sh\" >/dev/null 2>&1 &",
+            "timeout": 5,
+            "statusMessage": "claude config auto-pull"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/assume_yes_stop.py\"",
+            "timeout": 10,
+            "statusMessage": "assume-yes stop hook"
+          }
+        ]
+      }
+    ]
+  }
+}
