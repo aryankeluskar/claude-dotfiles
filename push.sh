@@ -6,6 +6,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cp "$HOME/.claude/settings.json"            "$REPO/claude/settings.json"
 cp "$HOME/.claude/hooks/assume_yes_stop.py" "$REPO/claude/hooks/assume_yes_stop.py"
+cp "$HOME/.claude/statusline.py"            "$REPO/claude/statusline.py"
 rsync -a "$HOME/.agents/skills/" "$REPO/agents/skills/"
 
 cd "$REPO"

@@ -45,5 +45,40 @@
         ]
       }
     ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "python3 \"$HOME/.claude/statusline.py\""
+  },
+  "enabledPlugins": {
+    "safety-net@cc-marketplace": true,
+    "swift-lsp@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "claude-code-setup@claude-plugins-official": true,
+    "hive-skills@hive": true,
+    "imessage@claude-plugins-official": true,
+    "andrej-karpathy-skills@karpathy-skills": true,
+    "ecc@ecc": true
+  },
+  "extraKnownMarketplaces": {
+    "hive": {
+      "source": {
+        "source": "github",
+        "repo": "rllm-org/hive"
+      }
+    },
+    "karpathy-skills": {
+      "source": {
+        "source": "github",
+        "repo": "forrestchang/andrej-karpathy-skills"
+      }
+    },
+    "ecc": {
+      "source": {
+        "source": "github",
+        "repo": "affaan-m/everything-claude-code"
+      }
+    }
   }
 }

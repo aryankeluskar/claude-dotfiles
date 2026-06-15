@@ -20,6 +20,9 @@ cp "$REPO/claude/settings.json" "$HOME/.claude/settings.json"
 backup_if_diff "$REPO/claude/hooks/assume_yes_stop.py" "$HOME/.claude/hooks/assume_yes_stop.py"
 cp "$REPO/claude/hooks/assume_yes_stop.py" "$HOME/.claude/hooks/assume_yes_stop.py"
 
+backup_if_diff "$REPO/claude/statusline.py" "$HOME/.claude/statusline.py"
+cp "$REPO/claude/statusline.py" "$HOME/.claude/statusline.py"
+
 # Real skill files live under ~/.agents/skills; ~/.claude/skills/<name> are relative symlinks.
 rsync -a "$REPO/agents/skills/" "$HOME/.agents/skills/"
 for d in "$REPO"/agents/skills/*/; do
