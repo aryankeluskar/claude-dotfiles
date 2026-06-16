@@ -84,6 +84,72 @@ def _read_count(path):
         return 0
 
 
+NOTIFY_TOOLS = {"PushNotification", "AskUserQuestion"}
+
+
+def _tail_lines(path, max_bytes=1_000_000):
+    """Read the last ~max_bytes of a (possibly large) JSONL transcript as lines,
+    dropping a partial leading line if we did not start at byte 0."""
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        start = max(0, size - max_bytes)
+        f.seek(start)
+        raw = f.read()
+    lines = raw.decode("utf-8", "replace").splitlines()
+    if start > 0 and lines:
+        lines = lines[1:]
+    return lines
+
+
+def _notified_this_turn(transcript_path):
+    """True if the assistant already reached the user via PushNotification or
+    AskUserQuestion since the last genuine user prompt. If so, the 'reach the AFK
+    user' nudge is moot and the stop should be allowed.
+
+    A *suppressed* notification still counts: the tool_use is recorded regardless
+    of whether delivery happened, and suppression ("you're active in this
+    terminal") means the user is present — the AFK premise is already false.
+    """
+    if not transcript_path:
+        return False
+    try:
+        lines = _tail_lines(os.path.expanduser(transcript_path))
+    except Exception:
+        return False
+    for line in reversed(lines):
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        role = entry.get("type") or entry.get("role")
+        msg = entry.get("message") if isinstance(entry.get("message"), dict) else {}
+        content = msg.get("content")
+        if role == "assistant" and isinstance(content, list):
+            for block in content:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_use"
+                    and block.get("name") in NOTIFY_TOOLS
+                ):
+                    return True
+        elif role == "user":
+            # A tool_result-only "user" message is the harness feeding tool output
+            # back, NOT a new user turn — keep scanning past it. A plain-text or
+            # text-block user message is the real turn boundary: stop here.
+            if isinstance(content, str):
+                return False
+            if isinstance(content, list):
+                only_tool_results = content and all(
+                    isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+                )
+                if not only_tool_results:
+                    return False
+            else:
+                return False
+    return False
+
+
 def main():
     try:
         data = json.load(sys.stdin)
@@ -103,6 +169,12 @@ def main():
 
     # Stop hook from here on. Only act in bypass-permissions mode.
     if data.get("permission_mode") != "bypassPermissions":
+        sys.exit(0)
+
+    # If the assistant already reached the user this turn (PushNotification or
+    # AskUserQuestion, delivered or suppressed), the "reach the AFK user" nudge is
+    # redundant — allow the stop instead of re-injecting the standing instruction.
+    if _notified_this_turn(data.get("transcript_path")):
         sys.exit(0)
 
     rounds = _read_count(path)
